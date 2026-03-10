@@ -1,35 +1,37 @@
-import { updateUser, findUserById } from "../repositories/userRepository";
+import db from "../utils/db";
+import { decideUserUpdate, UpdateUserResult } from "../domain/user/userUpdate";
+import { unwrap } from "../utils/Option";
+import type { UserRepository } from "../repositories/userRepository";
 
-type UpdateUserResult =
-  | { type: "not_found" }
-  | { type: "no_change"; user: User }
-  | { type: "updated"; before: User; after: User };
+export const createUserService = (repo: UserRepository) => {
+  const updateUserService = (
+    id: number,
+    name: string | undefined,
+    age: number | undefined,
+  ): UpdateUserResult => {
+    console.log("*** 1", id, name, age);
+    const user = unwrap(repo.findUserById(id));
 
-export const updateUserService = (
-  id: number,
-  name: string | undefined,
-  age: number | undefined,
-): UpdateUserResult => {
-  const user = findUserById(id);
+    console.log("updateUserService decideUserUpdate param", user, name, age);
 
-  if (!user) {
-    return { type: "not_found" };
-  }
+    const decision = decideUserUpdate(user, name, age);
+    console.log("updateUserService decision", decision);
 
-  const nextName = name ?? user.name;
-  const nextAge = age ?? user.age;
+    if (decision.type === "no_change") {
+      return decision;
+    }
+    const updatedUser = db.transaction(() => {
+      repo.updateUser(id, decision.after.name, decision.after.age);
+      repo.insertUserLog(id, decision.before, decision.after);
+      return decision.after;
+    })();
 
-  if (user.name === nextName && user.age === nextAge) {
-    // 変更なし
-    return { type: "no_change", user };
-  }
-  updateUser(id, name, age);
-
-  const updated = findUserById(id) as User;
-
-  return {
-    type: "updated",
-    before: user,
-    after: updated,
+    return {
+      type: "updated",
+      before: decision.before,
+      after: updatedUser,
+    };
   };
+
+  return { updateUserService };
 };
